@@ -1,0 +1,8 @@
+{
+  "name": "Remix Merkafacil Online",
+  "description": "Sistema de gestión para bodegas y minimarkets: inventario, punto de venta y reportes diarios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

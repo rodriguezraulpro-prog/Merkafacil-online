@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="merkaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Rect -->
+  <rect width="512" height="512" rx="110" fill="url(#merkaGrad)" />
+  
+  <!-- Store Front / Cart Icon in White -->
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" transform="translate(64, 64)">
+    <!-- Roof / Canopy -->
+    <path d="M32 144 L192 48 L352 144 Z" fill="#ffffff" fill-opacity="0.2" />
+    <!-- Store Base -->
+    <rect x="52" y="144" width="280" height="192" rx="16" />
+    <!-- Store Door / Counter -->
+    <rect x="144" y="208" width="96" height="128" rx="8" fill="#ffffff" fill-opacity="0.3" />
+    <!-- Shop Window Left -->
+    <rect x="80" y="176" width="48" height="48" rx="6" />
+    <!-- Shop Window Right -->
+    <rect x="256" y="176" width="48" height="48" rx="6" />
+  </g>
+</svg>
