@@ -25,17 +25,9 @@ export interface SupabaseConfigData {
 }
 
 let currentConfig: SupabaseConfigData = {
-  enabled: true,
-  url:
-    process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    'https://acqlhsnuyhddazcwdjqv.supabase.co',
-  anonKey:
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    'sb_publishable_eCcjPjPV31xjoxfFSdstIQ_v-uT2dNj',
-  connectedAt: new Date().toISOString(),
-  lastSyncAt: new Date().toISOString(),
+  enabled: false,
+  url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '',
+  anonKey: process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '',
 };
 
 // Load persisted config from disk if available

@@ -17,17 +17,26 @@ import {
 } from '../data/initialData';
 import type { FullAppState } from './api';
 
-const SUPABASE_CONFIG_KEY = 'merkafacil_supabase_config_v1';
-const SUPABASE_DISCONNECTED_KEY = 'merkafacil_supabase_disconnected_v1';
-const LOCAL_STATE_STORAGE_KEY = 'merkafacil_local_state_v3';
+const SUPABASE_CONFIG_KEY = 'merkafacil_supabase_config_v2';
+const SUPABASE_DISCONNECTED_KEY = 'merkafacil_supabase_disconnected_v2';
+const LOCAL_STATE_STORAGE_KEY = 'merkafacil_local_state_v4';
+
+// Clean up any legacy credentials from previous sessions once
+try {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('merkafacil_supabase_config_v1');
+    localStorage.removeItem('merkafacil_supabase_disconnected_v1');
+    localStorage.removeItem('merkafacil_local_state_v3');
+  }
+} catch (_) {}
 
 const DEFAULT_SUPABASE_URL =
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
-  'https://acqlhsnuyhddazcwdjqv.supabase.co';
+  '';
 
 const DEFAULT_SUPABASE_ANON_KEY =
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
-  'sb_publishable_eCcjPjPV31xjoxfFSdstIQ_v-uT2dNj';
+  '';
 
 export interface BrowserSupabaseConfig {
   enabled: boolean;
