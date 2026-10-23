@@ -179,7 +179,7 @@ export function disconnectBrowserSupabase(): { success: boolean; message: string
   cachedClientKey = '';
   return {
     success: true,
-    message: 'Nube de Supabase desconectada. El sistema ahora opera únicamente con la base de datos local.',
+    message: 'Nube desconectada. El sistema ahora opera únicamente con la base de datos local.',
   };
 }
 
@@ -355,7 +355,7 @@ export async function testAndConnectBrowserSupabase(
       success: true,
       latencyMs,
       config: newCfg,
-      message: `¡Conexión establecida exitosamente con Supabase PostgreSQL (${latencyMs}ms)! Nube activa y conectada.`,
+      message: `¡Conexión establecida exitosamente con la base de datos en la nube (${latencyMs}ms)! Nube activa y conectada.`,
     };
   } catch (err: any) {
     return {
@@ -399,7 +399,7 @@ export async function pushBrowserStateToSupabase(
   if (!targetUrl || !targetKey) {
     return {
       success: false,
-      error: 'No hay una conexión activa a Supabase. Guarda y prueba tus credenciales primero.',
+      error: 'No hay una conexión activa a la nube. Configura o verifica las credenciales en Soporte Técnico.',
     };
   }
 
@@ -672,13 +672,13 @@ export async function pushBrowserStateToSupabase(
         credits: state.credits.length,
         shifts: state.shifts.length,
       },
-      message: `¡Sincronización exitosa hacia Supabase! Se subieron ${state.products.length} productos, ${state.sales.length} ventas, ${state.credits.length} créditos, ${state.shifts.length} turnos y la configuración actual.`,
+      message: `¡Sincronización exitosa hacia la nube! Se subieron ${state.products.length} productos, ${state.sales.length} ventas, ${state.credits.length} créditos, ${state.shifts.length} turnos y la configuración actual.`,
     };
   } catch (err: any) {
     console.error('[SupabaseBrowser] Error pushing data:', err);
     return {
       success: false,
-      error: err.message || 'Error al subir los datos locales a Supabase.',
+      error: err.message || 'Error al subir los datos locales a la nube.',
     };
   }
 }
@@ -700,7 +700,7 @@ export async function pullBrowserStateFromSupabase(
   if (!targetUrl || !targetKey) {
     return {
       success: false,
-      error: 'No hay una conexión activa a Supabase. Guarda y prueba tus credenciales primero.',
+      error: 'No hay una conexión activa a la nube. Configura o verifica las credenciales en Soporte Técnico.',
     };
   }
 
@@ -940,13 +940,13 @@ export async function pullBrowserStateFromSupabase(
       success: true,
       state: pulledState,
       lastSyncAt,
-      message: `¡Datos descargados desde Supabase! Se sincronizaron ${products.length} productos, ${sales.length} ventas, ${credits.length} créditos y ${shifts.length} turnos.`,
+      message: `¡Datos descargados desde la nube! Se sincronizaron ${products.length} productos, ${sales.length} ventas, ${credits.length} créditos y ${shifts.length} turnos.`,
     };
   } catch (err: any) {
     console.error('[SupabaseBrowser] Error pulling data:', err);
     return {
       success: false,
-      error: err.message || 'Error al descargar los datos desde Supabase.',
+      error: err.message || 'Error al descargar los datos desde la nube.',
     };
   }
 }

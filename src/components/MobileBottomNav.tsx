@@ -202,9 +202,9 @@ export const MobileBottomNav: React.FC = () => {
                     <Database className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-xs font-black block">Base de Datos (Supabase PostgreSQL)</span>
+                    <span className="text-xs font-black block">Base de Datos (Nube)</span>
                     <span className={`text-[10px] font-semibold ${activeTab === 'supabase' ? 'text-slate-300' : 'text-emerald-800'}`}>
-                      Script SQL para clonar y credenciales en la nube
+                      Sincronización en la nube y vinculación de dispositivos
                     </span>
                   </div>
                 </div>

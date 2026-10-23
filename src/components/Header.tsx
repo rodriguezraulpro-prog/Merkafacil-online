@@ -36,7 +36,7 @@ export const Header: React.FC = () => {
     { id: 'creditos', label: 'Libreta', icon: BookOpen, badge: totalDebtorsCount > 0 ? totalDebtorsCount : undefined },
     { id: 'reportes', label: 'Reportes Diarios', icon: BarChart3 },
     { id: 'movimientos', label: 'Kardex / Movimientos', icon: History },
-    { id: 'supabase', label: 'Base de Datos (Supabase)', icon: Database },
+    { id: 'supabase', label: 'Base de Datos (Nube)', icon: Database },
     { id: 'ajustes', label: 'Ajustes', icon: Settings },
   ];
 
@@ -230,7 +230,7 @@ export const Header: React.FC = () => {
                 type="button"
                 onClick={() => setActiveTab('supabase')}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 text-xs font-bold transition-all shadow-2xs hover:bg-emerald-100 cursor-pointer"
-                title="Base de datos Supabase conectada y sincronizada en tiempo real entre tus dispositivos (PC y Celular)"
+                title="Base de datos en la nube conectada y sincronizada en tiempo real entre tus dispositivos (PC y Celular)"
               >
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                 <span className="text-[11px] font-black">Nube Activa</span>
