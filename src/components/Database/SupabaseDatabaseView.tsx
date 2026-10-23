@@ -21,6 +21,7 @@ import {
   CloudOff,
   UploadCloud,
   DownloadCloud,
+  Smartphone,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { api } from '../../services/api';
@@ -59,6 +60,7 @@ export const SupabaseDatabaseView: React.FC = () => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedPairingLink, setCopiedPairingLink] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error' | 'warning';
     message: string;
@@ -344,6 +346,21 @@ export const SupabaseDatabaseView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const getPairingUrl = () => {
+    if (typeof window === 'undefined') return '';
+    const cleanUrl = supabaseUrl.trim();
+    const cleanKey = supabaseAnonKey.trim();
+    return `${window.location.origin}${window.location.pathname}#sb_url=${encodeURIComponent(cleanUrl)}&sb_key=${encodeURIComponent(cleanKey)}`;
+  };
+
+  const handleCopyPairingLink = () => {
+    const link = getPairingUrl();
+    if (!link) return;
+    navigator.clipboard.writeText(link);
+    setCopiedPairingLink(true);
+    setTimeout(() => setCopiedPairingLink(false), 4000);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Top Technical Mode Banner */}
@@ -555,6 +572,80 @@ export const SupabaseDatabaseView: React.FC = () => {
                 />
               )}
               <span className="leading-relaxed">{feedback.message}</span>
+            </div>
+          )}
+
+          {/* Vincular Celular / Segundo Dispositivo */}
+          {isConnected && supabaseUrl.trim() && supabaseAnonKey.trim() && (
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-50 via-teal-50/50 to-slate-50 border border-emerald-200 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                    <Smartphone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900">
+                      Vincular Celular u Otro Dispositivo
+                    </h4>
+                    <p className="text-[10px] text-slate-500 font-semibold">
+                      Sincronización en tiempo real multi-dispositivo activa
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                  <span>En vivo</span>
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Escanea este código QR con la cámara de tu teléfono o copia el enlace directo. Tu celular se conectará al instante a esta misma base de datos sin tener que escribir las credenciales manualmente.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-center gap-4 pt-1">
+                <div className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-xs shrink-0 text-center">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=6&data=${encodeURIComponent(
+                      getPairingUrl()
+                    )}`}
+                    alt="QR Vinculación Merkafacil"
+                    className="w-28 h-28 mx-auto rounded-lg"
+                    loading="lazy"
+                  />
+                  <span className="text-[9px] font-extrabold text-slate-500 mt-1.5 block">
+                    Escanear con Teléfono
+                  </span>
+                </div>
+
+                <div className="flex-1 w-full space-y-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyPairingLink}
+                    className="w-full py-2.5 px-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition-colors flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                  >
+                    {copiedPairingLink ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-200" />
+                        <span>¡Enlace de Vinculación Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copiar Enlace de Vinculación</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="p-2.5 rounded-xl bg-white/90 border border-slate-200 text-[10px] text-slate-600 space-y-1">
+                    <p className="font-bold text-slate-800">
+                      ⚡ Sincronización Automática:
+                    </p>
+                    <p className="leading-snug">
+                      Cualquier producto, venta o abono registrado en la PC se sincroniza automáticamente en tu celular y viceversa.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

@@ -25,6 +25,16 @@ import {
   deleteFromBrowserSupabaseTable,
   wipeBrowserSupabaseDatabase,
   scheduleBrowserSupabasePush,
+  checkAndApplyUrlSupabaseConfig,
+  getSupabaseBrowserClient,
+  syncBrowserProduct,
+  deleteBrowserProduct,
+  syncBrowserSale,
+  syncBrowserCustomer,
+  syncBrowserCredit,
+  syncBrowserPayable,
+  syncBrowserShift,
+  syncBrowserSettings,
 } from './supabaseBrowser';
 
 export interface FullAppState {
@@ -73,45 +83,52 @@ async function safeRequestJson<T = any>(
 
 export const api = {
   async getState(): Promise<FullAppState> {
-    const serverRes = await safeRequestJson<FullAppState>('/api/state');
+    // 1. Check if URL contains Supabase credentials (e.g. from mobile link or QR code)
+    checkAndApplyUrlSupabaseConfig();
 
-    if (serverRes.ok && serverRes.isJson && serverRes.data) {
-      const state = serverRes.data;
-      const localHasData =
-        (state.products && state.products.length > 0) ||
-        (state.sales && state.sales.length > 0) ||
-        (state.credits && state.credits.length > 0);
+    // 2. If this device/browser doesn't have Supabase configured yet, try discovering from server
+    if (!isBrowserSupabaseActive()) {
+      try {
+        const cfgRes = await safeRequestJson<any>('/api/system/supabase-config');
+        if (cfgRes.ok && cfgRes.isJson && cfgRes.data?.url && cfgRes.data?.anonKey) {
+          saveBrowserSupabaseConfig({
+            enabled: Boolean(cfgRes.data.enabled),
+            isConnected: Boolean(cfgRes.data.isConnected),
+            url: cfgRes.data.url,
+            anonKey: cfgRes.data.anonKey,
+            connectedAt: cfgRes.data.connectedAt,
+            lastSyncAt: cfgRes.data.lastSyncAt,
+          });
+        }
+      } catch (_) {}
+    }
 
-      if (!localHasData && isBrowserSupabaseActive()) {
+    // 3. When Supabase is active, Supabase is the single source of truth across all devices!
+    if (isBrowserSupabaseActive()) {
+      try {
         const pulled = await pullBrowserStateFromSupabase();
-        if (
-          pulled.success &&
-          pulled.state &&
-          (pulled.state.products.length > 0 ||
-            pulled.state.sales.length > 0 ||
-            pulled.state.credits.length > 0)
-        ) {
-          await safeRequestJson('/api/backup/restore', {
+        if (pulled.success && pulled.state) {
+          // Hydrate local SQLite backup asynchronously if Express backend is running
+          safeRequestJson('/api/backup/restore', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(pulled.state),
-          });
+          }).catch(() => {});
           return pulled.state;
         }
-      }
-
-      saveBrowserLocalState(state);
-      return state;
-    }
-
-    // Fallback when running on static host (e.g. Vercel) without Express backend
-    if (isBrowserSupabaseActive()) {
-      const pulled = await pullBrowserStateFromSupabase();
-      if (pulled.success && pulled.state) {
-        return pulled.state;
+      } catch (err) {
+        console.warn('[API] Could not pull from Supabase directly:', err);
       }
     }
 
+    // 4. Fallback to Express backend (/api/state)
+    const serverRes = await safeRequestJson<FullAppState>('/api/state');
+    if (serverRes.ok && serverRes.isJson && serverRes.data) {
+      saveBrowserLocalState(serverRes.data);
+      return serverRes.data;
+    }
+
+    // 5. Final fallback to cached local state
     return getBrowserLocalState();
   },
 
@@ -121,33 +138,37 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(product),
     });
-    if (res.ok && res.isJson && res.data) {
-      return res.data;
-    }
-    const fallbackProd: Product = {
-      ...product,
-      id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      createdAt: new Date().toISOString(),
-    };
+    const created: Product = (res.ok && res.isJson && res.data)
+      ? res.data
+      : {
+          ...product,
+          id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          createdAt: new Date().toISOString(),
+        };
+
+    // Immediate sync to Supabase PostgreSQL (atomic)
+    syncBrowserProduct(created).catch(() => {});
+
     const st = getBrowserLocalState();
-    scheduleBrowserSupabasePush({
+    saveBrowserLocalState({
       ...st,
-      products: [fallbackProd, ...st.products],
+      products: [created, ...st.products.filter(p => p.id !== created.id)],
     });
-    return fallbackProd;
+    return created;
   },
 
   async updateProduct(product: Product): Promise<Product> {
-    const res = await safeRequestJson<Product>(`/api/products/${product.id}`, {
+    safeRequestJson<Product>(`/api/products/${product.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(product),
-    });
-    if (res.ok && res.isJson && res.data) {
-      return res.data;
-    }
+    }).catch(() => {});
+
+    // Immediate sync to Supabase PostgreSQL (atomic)
+    syncBrowserProduct(product).catch(() => {});
+
     const st = getBrowserLocalState();
-    scheduleBrowserSupabasePush({
+    saveBrowserLocalState({
       ...st,
       products: st.products.map((p) => (p.id === product.id ? product : p)),
     });
@@ -155,13 +176,12 @@ export const api = {
   },
 
   async deleteProduct(id: string): Promise<{ success: boolean }> {
-    const res = await safeRequestJson<{ success: boolean }>(`/api/products/${id}`, {
+    safeRequestJson<{ success: boolean }>(`/api/products/${id}`, {
       method: 'DELETE',
-    });
-    await deleteFromBrowserSupabaseTable('products', 'id', id);
-    if (res.ok && res.isJson && res.data) {
-      return res.data;
-    }
+    }).catch(() => {});
+
+    deleteBrowserProduct(id).catch(() => {});
+
     const st = getBrowserLocalState();
     saveBrowserLocalState({
       ...st,
@@ -183,16 +203,13 @@ export const api = {
         body: JSON.stringify({ newStock, reason }),
       }
     );
-    if (res.ok && res.isJson && res.data) {
-      return res.data;
-    }
     const st = getBrowserLocalState();
     const existing = st.products.find((p) => p.id === productId);
     const prevStock = existing ? existing.stock : 0;
-    const updatedProduct: Product = existing
+    const updatedProduct: Product = res.data?.product || (existing
       ? { ...existing, stock: Math.max(0, newStock) }
-      : ({ id: productId, stock: Math.max(0, newStock) } as Product);
-    const movement: StockMovement = {
+      : ({ id: productId, stock: Math.max(0, newStock) } as Product));
+    const movement: StockMovement = res.data?.movement || {
       id: `mov-${Date.now()}-${productId}`,
       productId,
       productName: existing?.name || 'Producto',
@@ -203,7 +220,27 @@ export const api = {
       reason: reason || 'Ajuste de inventario',
       date: new Date().toISOString(),
     };
-    scheduleBrowserSupabasePush({
+
+    syncBrowserProduct(updatedProduct).catch(() => {});
+    if (isBrowserSupabaseActive()) {
+      const cfg = getBrowserSupabaseConfig();
+      const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+      Promise.resolve(
+        client.from('movements').insert({
+          id: movement.id,
+          product_id: movement.productId,
+          product_name: movement.productName,
+          type: movement.type,
+          quantity: movement.quantity,
+          previous_stock: movement.previousStock,
+          new_stock: movement.newStock,
+          reason: movement.reason,
+          date: movement.date,
+        })
+      ).catch(() => {});
+    }
+
+    saveBrowserLocalState({
       ...st,
       products: st.products.map((p) => (p.id === productId ? updatedProduct : p)),
       movements: [movement, ...st.movements],
@@ -224,17 +261,14 @@ export const api = {
         body: JSON.stringify({ quantityToAdd, reason }),
       }
     );
-    if (res.ok && res.isJson && res.data) {
-      return res.data;
-    }
     const st = getBrowserLocalState();
     const existing = st.products.find((p) => p.id === productId);
     const prevStock = existing ? existing.stock : 0;
     const newStock = prevStock + quantityToAdd;
-    const updatedProduct: Product = existing
+    const updatedProduct: Product = res.data?.product || (existing
       ? { ...existing, stock: newStock }
-      : ({ id: productId, stock: newStock } as Product);
-    const movement: StockMovement = {
+      : ({ id: productId, stock: newStock } as Product));
+    const movement: StockMovement = res.data?.movement || {
       id: `mov-${Date.now()}-${productId}`,
       productId,
       productName: existing?.name || 'Producto',
@@ -245,7 +279,27 @@ export const api = {
       reason: reason || 'Reabastecimiento de mercancía',
       date: new Date().toISOString(),
     };
-    scheduleBrowserSupabasePush({
+
+    syncBrowserProduct(updatedProduct).catch(() => {});
+    if (isBrowserSupabaseActive()) {
+      const cfg = getBrowserSupabaseConfig();
+      const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+      Promise.resolve(
+        client.from('movements').insert({
+          id: movement.id,
+          product_id: movement.productId,
+          product_name: movement.productName,
+          type: movement.type,
+          quantity: movement.quantity,
+          previous_stock: movement.previousStock,
+          new_stock: movement.newStock,
+          reason: movement.reason,
+          date: movement.date,
+        })
+      ).catch(() => {});
+    }
+
+    saveBrowserLocalState({
       ...st,
       products: st.products.map((p) => (p.id === productId ? updatedProduct : p)),
       movements: [movement, ...st.movements],
@@ -317,8 +371,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(customer),
     });
-    if (res.ok && res.isJson && res.data) return res.data;
-    const savedCustomer: Customer = {
+    const savedCustomer: Customer = res.ok && res.isJson && res.data ? res.data : {
       id: customer.id || `cust-${Date.now()}`,
       idDocType: customer.idDocType,
       idDocNumber: customer.idDocNumber,
@@ -328,9 +381,12 @@ export const api = {
       creditLimitUSD: customer.creditLimitUSD,
       createdAt: new Date().toISOString(),
     };
+
+    syncBrowserCustomer(savedCustomer).catch(() => {});
+
     const st = getBrowserLocalState();
     const exists = st.customers.some((c) => c.id === savedCustomer.id);
-    scheduleBrowserSupabasePush({
+    saveBrowserLocalState({
       ...st,
       customers: exists
         ? st.customers.map((c) => (c.id === savedCustomer.id ? savedCustomer : c))
@@ -340,18 +396,20 @@ export const api = {
   },
 
   async updateCustomerCreditLimit(customerId: string, creditLimitUSD?: number): Promise<void> {
-    const res = await safeRequestJson(`/api/customers/${customerId}/credit-limit`, {
+    safeRequestJson(`/api/customers/${customerId}/credit-limit`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ creditLimitUSD }),
-    });
-    if (!res.ok) {
-      const st = getBrowserLocalState();
-      scheduleBrowserSupabasePush({
+    }).catch(() => {});
+
+    const st = getBrowserLocalState();
+    const target = st.customers.find(c => c.id === customerId);
+    if (target) {
+      const updated = { ...target, creditLimitUSD };
+      syncBrowserCustomer(updated).catch(() => {});
+      saveBrowserLocalState({
         ...st,
-        customers: st.customers.map((c) =>
-          c.id === customerId ? { ...c, creditLimitUSD } : c
-        ),
+        customers: st.customers.map((c) => (c.id === customerId ? updated : c)),
       });
     }
   },
@@ -375,10 +433,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(creditData),
     });
-    if (res.ok && res.isJson && res.data) return res.data;
     const st = getBrowserLocalState();
     const rate = creditData.bcvRate || st.settings.bcvRate || 54.5;
-    const fallbackCredit: CreditRecord = {
+    const credit: CreditRecord = res.ok && res.isJson && res.data ? res.data : {
       id: creditData.id || `cred-${Date.now()}`,
       customerId: creditData.customerId,
       customerName: creditData.customerName,
@@ -397,11 +454,14 @@ export const api = {
       notes: creditData.notes,
       payments: [],
     };
-    scheduleBrowserSupabasePush({
+
+    syncBrowserCredit(credit).catch(() => {});
+
+    saveBrowserLocalState({
       ...st,
-      credits: [fallbackCredit, ...st.credits.filter((c) => c.id !== fallbackCredit.id)],
+      credits: [credit, ...st.credits.filter((c) => c.id !== credit.id)],
     });
-    return fallbackCredit;
+    return credit;
   },
 
   async addCreditPayment(
@@ -427,6 +487,47 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(paymentData),
     });
+
+    const st = getBrowserLocalState();
+    const existing = st.credits.find((c) => c.id === creditRecordId);
+    if (existing) {
+      const rate = existing.bcvRate || st.settings.bcvRate || 54.5;
+      const paidUSD =
+        paymentData.currency === 'Bs.' ? (paymentData.amountPaid || 0) / rate : paymentData.amountPaid;
+      const nextBalanceUSD = Math.max(0, existing.currentBalanceUSD - paidUSD);
+      const nextStatus = nextBalanceUSD <= 0.01 ? 'pagado' : 'parcial';
+      const newPayment: CreditPayment = {
+        id: `pay-${Date.now()}`,
+        creditRecordId,
+        customerId: existing.customerId,
+        date: new Date().toISOString(),
+        amountUSD: paidUSD,
+        amountBs: paymentData.currency === 'Bs.' ? paymentData.amountPaid : paidUSD * rate,
+        bcvRate: rate,
+        paymentMethod: paymentData.paymentMethod,
+        currency: paymentData.currency,
+        paymentReference: paymentData.paymentReference,
+        notes: paymentData.notes,
+        receivedByUserName: paymentData.receivedByUserName || 'Administrador Bodega',
+        shiftId: paymentData.shiftId,
+      };
+
+      const updatedCredit: CreditRecord = {
+        ...existing,
+        currentBalanceUSD: nextBalanceUSD,
+        status: nextStatus as any,
+        payments: [...(existing.payments || []), newPayment],
+      };
+
+      syncBrowserCredit(updatedCredit).catch(() => {});
+
+      saveBrowserLocalState({
+        ...st,
+        credits: st.credits.map((c) => (c.id === creditRecordId ? updatedCredit : c)),
+      });
+      return { success: true, payment: newPayment, credit: updatedCredit };
+    }
+
     if (res.ok && res.isJson && res.data) return res.data;
     return { success: true };
   },
@@ -536,16 +637,34 @@ export const api = {
     return { success: true };
   },
 
-  async createSale(sale: Sale): Promise<{ success: boolean; sale?: Sale; error?: string }> {
-    const res = await safeRequestJson<{ success: boolean; sale?: Sale; error?: string }>(
+  async createSale(
+    sale: Sale,
+    movements?: StockMovement[],
+    updatedProducts?: { id: string; stock: number }[]
+  ): Promise<{ success: boolean; sale?: Sale; error?: string }> {
+    safeRequestJson<{ success: boolean; sale?: Sale; error?: string }>(
       '/api/sales',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sale),
       }
-    );
-    if (res.ok && res.isJson && res.data) return res.data;
+    ).catch(() => {});
+
+    syncBrowserSale(sale, movements, updatedProducts).catch(() => {});
+
+    const st = getBrowserLocalState();
+    saveBrowserLocalState({
+      ...st,
+      sales: [sale, ...st.sales.filter((s) => s.id !== sale.id)],
+      movements: movements ? [...movements, ...st.movements] : st.movements,
+      products: updatedProducts
+        ? st.products.map((p) => {
+            const match = updatedProducts.find((u) => u.id === p.id);
+            return match ? { ...p, stock: match.stock } : p;
+          })
+        : st.products,
+    });
     return { success: true, sale };
   },
 
@@ -554,15 +673,46 @@ export const api = {
     reason?: string,
     cancelledBy?: string
   ): Promise<{ success: boolean; error?: string }> {
-    const res = await safeRequestJson<{ success: boolean; error?: string }>(
+    safeRequestJson<{ success: boolean; error?: string }>(
       `/api/sales/${saleId}/cancel`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason, cancelledBy }),
       }
-    );
-    if (res.ok && res.isJson && res.data) return res.data;
+    ).catch(() => {});
+
+    if (isBrowserSupabaseActive()) {
+      const cfg = getBrowserSupabaseConfig();
+      const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+      Promise.resolve(
+        client
+          .from('sales')
+          .update({
+            status: 'anulada',
+            cancelled_reason: reason || null,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: cancelledBy || null,
+          })
+          .eq('id', saleId)
+      ).catch(() => {});
+    }
+
+    const st = getBrowserLocalState();
+    saveBrowserLocalState({
+      ...st,
+      sales: st.sales.map((s) =>
+        s.id === saleId
+          ? {
+              ...s,
+              status: 'anulada' as const,
+              cancelledReason: reason,
+              cancelledAt: new Date().toISOString(),
+              cancelledBy,
+            }
+          : s
+      ),
+    });
     return { success: true };
   },
 

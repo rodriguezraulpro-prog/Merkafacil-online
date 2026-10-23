@@ -30,6 +30,54 @@ try {
   }
 } catch (_) {}
 
+export function checkAndApplyUrlSupabaseConfig(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+    const hashParams = new URLSearchParams(hash);
+
+    const url =
+      searchParams.get('sb_url') ||
+      searchParams.get('supabase_url') ||
+      hashParams.get('sb_url') ||
+      hashParams.get('supabase_url');
+    const anonKey =
+      searchParams.get('sb_key') ||
+      searchParams.get('supabase_key') ||
+      hashParams.get('sb_key') ||
+      hashParams.get('supabase_key');
+
+    if (url && anonKey) {
+      const cleanUrl = url.trim().replace(/\/+$/, '');
+      const cleanKey = anonKey.trim();
+      if (cleanUrl.startsWith('http') && cleanKey.length >= 15) {
+        const now = new Date().toISOString();
+        saveBrowserSupabaseConfig({
+          enabled: true,
+          isConnected: true,
+          url: cleanUrl,
+          anonKey: cleanKey,
+          connectedAt: now,
+          lastSyncAt: now,
+        });
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error reading URL config:', err);
+  }
+  return false;
+}
+
+// Check URL params on initial load
+try {
+  checkAndApplyUrlSupabaseConfig();
+} catch (_) {}
+
 const DEFAULT_SUPABASE_URL =
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
   '';
@@ -950,4 +998,286 @@ export function scheduleBrowserSupabasePush(state: FullAppState): void {
       console.warn('[SupabaseBrowser] Background sync warning:', err);
     });
   }, 600);
+}
+
+// ============================================================================
+// REALTIME SUBSCRIPTIONS & DIRECT ATOMIC MUTATIONS
+// ============================================================================
+
+export function subscribeToSupabaseRealtime(
+  onDbChange: (table?: string) => void
+): () => void {
+  if (!isBrowserSupabaseActive()) return () => {};
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const channelId = `realtime-merkafacil-${Math.random().toString(36).substring(2, 7)}`;
+    const channel = client
+      .channel(channelId)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        (payload) => {
+          console.log('[Supabase Realtime] Cambio detectado en tabla:', payload.table);
+          onDbChange(payload.table);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Supabase Realtime] Canal conectado en tiempo real.');
+        }
+      });
+
+    return () => {
+      try {
+        client.removeChannel(channel);
+      } catch (_) {}
+    };
+  } catch (err) {
+    console.warn('[Supabase Realtime] Error en suscripción:', err);
+    return () => {};
+  }
+}
+
+export async function syncBrowserProduct(product: Product): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const row = {
+      id: product.id,
+      barcode: product.barcode || '',
+      name: product.name,
+      category: product.category || 'Otros',
+      cost_price_usd: Number(product.costPriceUSD) || 0,
+      sale_price_usd: Number(product.salePriceUSD) || 0,
+      stock: Number(product.stock) || 0,
+      min_stock: Number(product.minStock) || 0,
+      unit: product.unit || 'unidad',
+      tax_type: product.taxType || 'exento',
+      description: product.description || null,
+      created_at: product.createdAt || new Date().toISOString(),
+    };
+    await client.from('products').upsert(row, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing product:', err);
+  }
+}
+
+export async function deleteBrowserProduct(productId: string): Promise<void> {
+  await deleteFromBrowserSupabaseTable('products', 'id', productId);
+}
+
+export async function syncBrowserSale(
+  sale: Sale,
+  movements?: StockMovement[],
+  updatedProducts?: { id: string; stock: number }[]
+): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const saleRow = {
+      id: sale.id,
+      sale_number: sale.saleNumber,
+      date: sale.date,
+      items: sale.items || [],
+      bcv_rate: Number(sale.bcvRate) || 1,
+      subtotal_usd: Number(sale.subtotalUSD) || 0,
+      discount_usd: Number(sale.discountUSD) || 0,
+      total_usd: Number(sale.totalUSD) || 0,
+      total_cost_usd: Number(sale.totalCostUSD) || 0,
+      profit_usd: Number(sale.profitUSD) || 0,
+      subtotal_bs: Number(sale.subtotalBs) || 0,
+      discount_bs: Number(sale.discountBs) || 0,
+      total_bs: Number(sale.totalBs) || 0,
+      profit_bs: Number(sale.profitBs) || 0,
+      exempt_amount_usd: Number(sale.exemptAmountUSD) || 0,
+      exempt_amount_bs: Number(sale.exemptAmountBs) || 0,
+      taxable_amount_usd: Number(sale.taxableAmountUSD) || 0,
+      taxable_amount_bs: Number(sale.taxableAmountBs) || 0,
+      vat_amount_usd: Number(sale.vatAmountUSD) || 0,
+      vat_amount_bs: Number(sale.vatAmountBs) || 0,
+      igtf_amount_usd: Number(sale.igtfAmountUSD) || 0,
+      igtf_amount_bs: Number(sale.igtfAmountBs) || 0,
+      payment_method: sale.paymentMethod,
+      payment_currency: sale.paymentCurrency,
+      payment_reference: sale.paymentReference || null,
+      payment_splits: sale.paymentSplits || [],
+      amount_paid: Number(sale.amountPaid) || 0,
+      change_bs: Number(sale.changeBs) || 0,
+      change_usd: Number(sale.changeUSD) || 0,
+      customer_name: sale.customerName || null,
+      customer_id_doc: sale.customerIdDoc || null,
+      customer_phone: sale.customerPhone || null,
+      customer_address: sale.customerAddress || null,
+      cashier_name: sale.cashierName || null,
+      shift_id: sale.shiftId || null,
+      notes: sale.notes || null,
+      status: sale.status || 'completada',
+      cancelled_reason: sale.cancelledReason || null,
+      cancelled_at: sale.cancelledAt || null,
+      cancelled_by: sale.cancelledBy || null,
+    };
+
+    await client.from('sales').upsert(saleRow, { onConflict: 'id' });
+
+    if (movements && movements.length > 0) {
+      const movRows = movements.map((m) => ({
+        id: m.id,
+        product_id: m.productId,
+        product_name: m.productName,
+        type: m.type,
+        quantity: Number(m.quantity) || 0,
+        previous_stock: Number(m.previousStock) || 0,
+        new_stock: Number(m.newStock) || 0,
+        reason: m.reason,
+        date: m.date,
+      }));
+      await client.from('movements').upsert(movRows, { onConflict: 'id' });
+    }
+
+    if (updatedProducts && updatedProducts.length > 0) {
+      for (const p of updatedProducts) {
+        await client.from('products').update({ stock: p.stock }).eq('id', p.id);
+      }
+    }
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing sale:', err);
+  }
+}
+
+export async function syncBrowserCustomer(customer: Customer): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const row = {
+      id: customer.id,
+      id_doc_type: customer.idDocType || 'V',
+      id_doc_number: customer.idDocNumber || '',
+      name: customer.name,
+      phone: customer.phone || null,
+      email: customer.email || null,
+      address: customer.address || null,
+      credit_limit_usd: customer.creditLimitUSD != null ? Number(customer.creditLimitUSD) : null,
+      notes: customer.notes || null,
+      created_at: customer.createdAt || new Date().toISOString(),
+    };
+    await client.from('customers').upsert(row, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing customer:', err);
+  }
+}
+
+export async function syncBrowserCredit(credit: CreditRecord): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const row = {
+      id: credit.id,
+      customer_id: credit.customerId,
+      customer_name: credit.customerName,
+      customer_id_doc: credit.customerIdDoc || null,
+      customer_phone: credit.customerPhone || null,
+      customer_address: credit.customerAddress || null,
+      sale_id: credit.saleId || null,
+      sale_number: credit.saleNumber || null,
+      date: credit.date,
+      original_amount_usd: Number(credit.originalAmountUSD) || 0,
+      original_amount_bs: Number(credit.originalAmountBs) || 0,
+      bcv_rate: Number(credit.bcvRate) || 1,
+      current_balance_usd: Number(credit.currentBalanceUSD) || 0,
+      status: credit.status || 'pendiente',
+      description: credit.description || null,
+      notes: credit.notes || null,
+      payments: credit.payments || [],
+    };
+    await client.from('credits').upsert(row, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing credit:', err);
+  }
+}
+
+export async function syncBrowserPayable(payable: PayableRecord): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const row = {
+      id: payable.id,
+      supplier_name: payable.supplierName,
+      supplier_doc: payable.supplierDoc || null,
+      supplier_phone: payable.supplierPhone || null,
+      invoice_number: payable.invoiceNumber || null,
+      description: payable.description || '',
+      date: payable.date,
+      due_date: payable.dueDate || null,
+      original_amount_usd: Number(payable.originalAmountUSD) || 0,
+      original_amount_bs: Number(payable.originalAmountBs) || 0,
+      bcv_rate: Number(payable.bcvRate) || 1,
+      current_balance_usd: Number(payable.currentBalanceUSD) || 0,
+      status: payable.status || 'pendiente',
+      notes: payable.notes || null,
+      payments: payable.payments || [],
+    };
+    await client.from('payables').upsert(row, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing payable:', err);
+  }
+}
+
+export async function syncBrowserShift(shift: CashShift): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    const row = {
+      id: shift.id,
+      shift_number: Number(shift.shiftNumber) || 1,
+      opened_at: shift.openedAt,
+      closed_at: shift.closedAt || null,
+      opened_by_user_id: shift.openedByUserId,
+      opened_by_user_name: shift.openedByUserName,
+      closed_by_user_id: shift.closedByUserId || null,
+      closed_by_user_name: shift.closedByUserName || null,
+      initial_cash_bs: Number(shift.initialCashBs) || 0,
+      initial_cash_usd: Number(shift.initialCashUSD) || 0,
+      cash_entries: shift.cashEntries || [],
+      status: shift.status || 'abierta',
+      expected_cash_bs: shift.expectedCashBs != null ? Number(shift.expectedCashBs) : null,
+      expected_cash_usd: shift.expectedCashUSD != null ? Number(shift.expectedCashUSD) : null,
+      counted_cash_bs: shift.countedCashBs != null ? Number(shift.countedCashBs) : null,
+      counted_cash_usd: shift.countedCashUSD != null ? Number(shift.countedCashUSD) : null,
+      difference_bs: shift.differenceBs != null ? Number(shift.differenceBs) : null,
+      difference_usd: shift.differenceUSD != null ? Number(shift.differenceUSD) : null,
+      total_sales_count: shift.totalSalesCount != null ? Number(shift.totalSalesCount) : null,
+      total_sales_bs: shift.totalSalesBs != null ? Number(shift.totalSalesBs) : null,
+      total_sales_usd: shift.totalSalesUSD != null ? Number(shift.totalSalesUSD) : null,
+      payment_summary: shift.paymentSummary || null,
+      notes: shift.notes || null,
+    };
+    await client.from('shifts').upsert(row, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing shift:', err);
+  }
+}
+
+export async function syncBrowserSettings(settings: StoreSettings): Promise<void> {
+  if (!isBrowserSupabaseActive()) return;
+  const cfg = getBrowserSupabaseConfig();
+  try {
+    const client = getSupabaseBrowserClient(cfg.url, cfg.anonKey);
+    await client.from('settings').upsert(
+      {
+        key: 'current',
+        value: settings,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'key' }
+    );
+  } catch (err) {
+    console.warn('[SupabaseBrowser] Error syncing settings:', err);
+  }
 }

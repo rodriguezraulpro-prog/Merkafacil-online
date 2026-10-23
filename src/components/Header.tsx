@@ -2,6 +2,7 @@ import React from 'react';
 import { Store, ShoppingBag, Package, BarChart3, History, Settings, AlertTriangle, DollarSign, Shield, LogOut, LogIn, Vault, Lock, BookOpen, RefreshCw, Database, Globe } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { ActiveTab } from '../types';
+import { isBrowserSupabaseActive } from '../services/supabaseBrowser';
 
 export const Header: React.FC = () => {
   const {
@@ -224,24 +225,37 @@ export const Header: React.FC = () => {
             )}
 
             {/* Cloud Online Connectivity Badge */}
-            <div 
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-2xs ${
-                isOnline 
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-                  : 'bg-amber-50 border-amber-300 text-amber-900'
-              }`}
-              title={isOnline ? `Conectado al servidor en la nube${serverLatencyMs !== null ? ` (Latencia: ${serverLatencyMs}ms)` : ''}` : 'Sin conexión o intentando reconectar con el servidor'}
-            >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-ping'}`} />
-              <span className="text-[11px] font-bold">
-                {isOnline ? 'Online' : 'Sin Red'}
-              </span>
-              {isOnline && serverLatencyMs !== null && (
-                <span className="text-[10px] font-mono text-emerald-600 hidden xl:inline">
-                  {serverLatencyMs}ms
+            {isBrowserSupabaseActive() ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab('supabase')}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 text-xs font-bold transition-all shadow-2xs hover:bg-emerald-100 cursor-pointer"
+                title="Base de datos Supabase conectada y sincronizada en tiempo real entre tus dispositivos (PC y Celular)"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="text-[11px] font-black">Nube Activa</span>
+                <span className="text-[10px] text-emerald-700 hidden sm:inline font-semibold">• Sincronizado</span>
+              </button>
+            ) : (
+              <div 
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-2xs ${
+                  isOnline 
+                    ? 'bg-slate-50 border-slate-200 text-slate-700' 
+                    : 'bg-amber-50 border-amber-300 text-amber-900'
+                }`}
+                title={isOnline ? `Conectado al servidor local${serverLatencyMs !== null ? ` (${serverLatencyMs}ms)` : ''}` : 'Sin red'}
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-slate-400' : 'bg-amber-500 animate-ping'}`} />
+                <span className="text-[11px] font-bold">
+                  {isOnline ? 'Modo Local' : 'Sin Red'}
                 </span>
-              )}
-            </div>
+                {isOnline && serverLatencyMs !== null && (
+                  <span className="text-[10px] font-mono text-slate-500 hidden xl:inline">
+                    {serverLatencyMs}ms
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Desktop User / Admin Session Capsule */}
             <div className="hidden lg:flex items-center">

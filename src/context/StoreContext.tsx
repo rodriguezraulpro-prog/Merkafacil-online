@@ -29,7 +29,11 @@ import {
   INITIAL_CREDITS 
 } from '../data/initialData';
 import { api } from '../services/api';
-import { scheduleBrowserSupabasePush } from '../services/supabaseBrowser';
+import {
+  subscribeToSupabaseRealtime,
+  isBrowserSupabaseActive,
+  getBrowserSupabaseConfig,
+} from '../services/supabaseBrowser';
 
 interface StoreContextType {
   products: Product[];
@@ -360,36 +364,78 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await loadStateFromSqlite();
   }, [loadStateFromSqlite]);
 
-  // Keep browser local state & Supabase PostgreSQL synchronized in real time
+  // Silent refresh that updates state in the background without screen flicker
+  const silentRefreshState = useCallback(async () => {
+    try {
+      const state = await api.getState();
+      setProducts(state.products || []);
+      setCategories(state.categories || INITIAL_CATEGORIES);
+      setCustomers(state.customers || []);
+      setCredits(state.credits || []);
+      setPayables(state.payables || []);
+      setSales(state.sales || []);
+      setMovements(state.movements || []);
+      setShifts(state.shifts || []);
+      setCurrentShift(state.currentShift || null);
+      if (state.settings) {
+        setSettings(prev => ({ ...prev, ...state.settings }));
+      }
+      if (state.users && state.users.length > 0) {
+        setUsers(state.users);
+      }
+      setIsDbConnected(true);
+      setIsOnline(true);
+    } catch (err) {
+      console.warn('[Sync] Silent refresh warning:', err);
+    }
+  }, []);
+
+  // Multi-Device Realtime synchronization: Listen to Supabase postgres_changes + polling + focus
   useEffect(() => {
-    if (isDbLoading) return;
-    scheduleBrowserSupabasePush({
-      products,
-      categories,
-      customers,
-      credits,
-      payables,
-      sales,
-      movements,
-      shifts,
-      currentShift,
-      users,
-      settings,
-    });
-  }, [
-    isDbLoading,
-    products,
-    categories,
-    customers,
-    credits,
-    payables,
-    sales,
-    movements,
-    shifts,
-    currentShift,
-    users,
-    settings,
-  ]);
+    let unsubscribeRealtime: (() => void) | null = null;
+    let isMounted = true;
+
+    const setupRealtime = () => {
+      if (isBrowserSupabaseActive()) {
+        try {
+          unsubscribeRealtime = subscribeToSupabaseRealtime((table) => {
+            if (!isMounted) return;
+            console.log(`[Realtime Sync] Evento recibido en tabla: ${table || 'db'}, actualizando...`);
+            silentRefreshState();
+          });
+        } catch (e) {
+          console.warn('[Realtime Sync] Could not subscribe:', e);
+        }
+      }
+    };
+
+    setupRealtime();
+
+    // Polling fallback every 6 seconds to ensure data is always fresh between PC and mobile
+    const pollTimer = setInterval(() => {
+      if (isMounted && typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
+        silentRefreshState();
+      }
+    }, 6000);
+
+    // Immediate sync when user focuses the window or switches tabs / unlocks phone
+    const handleFocusOrVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
+        silentRefreshState();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleFocusOrVisible);
+    window.addEventListener('focus', handleFocusOrVisible);
+
+    return () => {
+      isMounted = false;
+      if (unsubscribeRealtime) unsubscribeRealtime();
+      clearInterval(pollTimer);
+      window.removeEventListener('visibilitychange', handleFocusOrVisible);
+      window.removeEventListener('focus', handleFocusOrVisible);
+    };
+  }, [silentRefreshState]);
 
   // Heartbeat to monitor online status and latency
   const checkOnlineHeartbeat = useCallback(async () => {
@@ -1639,8 +1685,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setPendingReceiptSale(newSale);
     }
 
-    // Persist sale to SQLite database on the server
-    api.createSale(newSale).catch(err => console.error('SQLite createSale sync error', err));
+    // Persist sale, movements and stock deductions to Supabase & SQLite
+    api.createSale(
+      newSale,
+      newMovements,
+      updatedProducts.map(p => ({ id: p.id, stock: p.stock }))
+    ).catch(err => console.error('createSale sync error', err));
 
     return { success: true, sale: newSale };
   };

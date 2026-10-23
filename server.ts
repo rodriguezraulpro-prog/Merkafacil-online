@@ -124,6 +124,17 @@ async function startServer() {
   // State snapshot (hydrates full frontend from DB in 1 request)
   app.get('/api/state', async (req, res) => {
     try {
+      if (isSupabaseActive()) {
+        try {
+          const pulled = await pullStateFromSupabase();
+          if (pulled.success && pulled.state) {
+            await restoreFullBackup(pulled.state);
+            return res.json(pulled.state);
+          }
+        } catch (supabaseErr) {
+          console.warn('[Supabase] Error pulling state on /api/state, falling back to SQLite:', supabaseErr);
+        }
+      }
       const state = await getFullState();
       res.json(state);
     } catch (err: any) {
